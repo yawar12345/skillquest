@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Functional tests
     env:
+      FUNCTIONS_WORKER_RUNTIME: node
+      AzureWebJobsStorage: ""
       COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
       COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
       COSMOS_DATABASE: skillquest
