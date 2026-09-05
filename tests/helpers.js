@@ -74,24 +74,43 @@ export async function playBalloonGame(page) {
   }
 }
 
-/** Plays Memory Grid to a quick finish (two misses ends the game early). */
+/**
+ * Plays Memory Grid to a quick finish (two misses ends the game early).
+ * Clicking cell 1 is wrong for virtually every sequence, but only counts as
+ * a miss once the "showing" phase has actually finished — clicking too
+ * early is silently ignored by the game, not registered as a failure. Waits
+ * for the "Your turn" input-phase indicator before each click rather than
+ * assuming fixed timing, and caps at a few extra attempts to absorb the
+ * rare case where cell 1 happens to be correct for a given position.
+ */
 export async function playMemoryGame(page) {
   await waitForGameTitle(page, "Memory Grid", 10000)
   await startGameIfIntro(page, "Memory Grid")
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await page.waitForTimeout(3000)
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (await page.locator('h2:has-text("Card Sort")').isVisible().catch(() => false)) return
+    await page.waitForSelector("text=Your turn", { timeout: 10000 }).catch(() => {})
     await page.locator('button[aria-label^="Cell"]').first().click().catch(() => {})
-    await page.waitForTimeout(1200)
+    await page.waitForTimeout(1000)
   }
 }
 
-/** Plays Card Sort to completion (24 trials, always picks pile 1). */
+/**
+ * Plays Card Sort to completion (24 trials, always picks pile 1). Each
+ * trial locks input for a fixed feedback window after a click; a click that
+ * lands during that window is silently ignored rather than counted, so this
+ * polls for the transition to the next game instead of assuming a fixed
+ * number of clicks always lands.
+ */
 export async function playCardSortGame(page) {
   await waitForGameTitle(page, "Card Sort", 15000)
   await startGameIfIntro(page, "Card Sort")
-  for (let t = 0; t < 24; t++) {
+
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    if (await page.locator('h2:has-text("Reaction Speed")').isVisible().catch(() => false)) return
     await page.getByRole("button", { name: "Pile 1" }).click().catch(() => {})
-    await page.waitForTimeout(600)
+    await page.waitForTimeout(650)
   }
 }
 
