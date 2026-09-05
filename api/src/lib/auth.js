@@ -43,9 +43,13 @@ function verifyAdminToken(token) {
   }
 }
 
+// Azure Static Web Apps' proxy for a linked (managed) Functions API
+// overwrites the standard `Authorization` header with its own internal
+// platform token before the request reaches this code — any custom bearer
+// token sent there is silently discarded. A custom header name isn't
+// reserved, so it survives the proxy untouched.
 function isAdminRequest(request) {
-  const header = request.headers.get("authorization") || ""
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null
+  const token = request.headers.get("x-admin-token")
   return Boolean(token && verifyAdminToken(token))
 }
 

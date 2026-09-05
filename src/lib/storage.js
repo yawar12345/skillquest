@@ -10,8 +10,11 @@ const ADMIN_TOKEN_KEY = "skillquest.admin_token.v1"
 async function apiFetch(path, { auth = false, ...options } = {}) {
   const headers = { "Content-Type": "application/json", ...options.headers }
   if (auth) {
+    // Not a standard Authorization header — Azure Static Web Apps' proxy
+    // for a linked Functions API overwrites that one with its own internal
+    // platform token, silently discarding whatever the client sent.
     const token = localStorage.getItem(ADMIN_TOKEN_KEY)
-    if (token) headers.Authorization = `Bearer ${token}`
+    if (token) headers["X-Admin-Token"] = token
   }
   const res = await fetch(`/api${path}`, { ...options, headers })
   if (res.status === 404) return null
