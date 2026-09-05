@@ -95,19 +95,28 @@ export async function playCardSortGame(page) {
   }
 }
 
-/** Plays Reaction Speed to completion (20 trials). */
+/**
+ * Plays Reaction Speed to completion (20 trials). Each trial's shape appears
+ * after a randomized delay and auto-resolves as a miss/restraint if nothing
+ * is clicked in time, so total game time varies run to run — this polls for
+ * a visible target and clicks it, and stops as soon as the results screen
+ * shows up, rather than assuming fixed per-trial timing.
+ */
 export async function playReactionGame(page) {
   await waitForGameTitle(page, "Reaction Speed", 15000)
   await startGameIfIntro(page, "Reaction Speed")
-  for (let t = 0; t < 20; t++) {
+
+  const target = page.getByRole("button", { name: "Target" })
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    if (await page.getByText("You're all done").isVisible().catch(() => false)) return
     try {
-      const target = page.getByRole("button", { name: "Target" })
-      await target.waitFor({ timeout: 2500 })
-      await target.click({ timeout: 800 })
+      await target.waitFor({ timeout: 800 })
+      await target.click({ timeout: 500 })
     } catch {
-      await page.waitForTimeout(1200)
+      // a decoy is showing, or we're between trials — nothing to click yet
     }
-    await page.waitForTimeout(150)
+    await page.waitForTimeout(100)
   }
 }
 
@@ -118,5 +127,5 @@ export async function completeAssessment(page, url, candidate) {
   await playMemoryGame(page)
   await playCardSortGame(page)
   await playReactionGame(page)
-  await page.waitForSelector("text=You're all done", { timeout: 10000 })
+  await page.waitForSelector("text=You're all done", { timeout: 15000 })
 }
