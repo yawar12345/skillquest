@@ -1,114 +1,57 @@
 // Data layer for SkillQuest.
 //
-// Every function here returns a Promise, even though the current
-// implementation is a synchronous localStorage read/write. That keeps the
-// call sites (components, hooks) identical to what they'd look like against
-// a real HTTP API — swapping the body of these functions for `fetch` calls
-// later shouldn't require touching anything outside this file.
+// Backed by the Azure Functions API under /api — every function here
+// already returned a Promise even back when this was a localStorage-only
+// prototype, specifically so this swap wouldn't require touching anything
+// outside this file.
 
-import { SAMPLE_CANDIDATES } from "@/lib/sampleData"
+const ADMIN_TOKEN_KEY = "skillquest.admin_token.v1"
 
-const SESSIONS_KEY = "skillquest.sessions.v1"
-const ADMIN_AUTH_KEY = "skillquest.admin_authed.v1"
-
-export const GAME_KEYS = ["balloon", "memory", "cardSort", "reaction"]
-
-function readSessions() {
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
+async function apiFetch(path, { auth = false, ...options } = {}) {
+  const headers = { "Content-Type": "application/json", ...options.headers }
+  if (auth) {
+    const token = localStorage.getItem(ADMIN_TOKEN_KEY)
+    if (token) headers.Authorization = `Bearer ${token}`
   }
-}
-
-function writeSessions(sessions) {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions))
-}
-
-function generateId() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID().slice(0, 8)
+  const res = await fetch(`/api${path}`, { ...options, headers })
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new Error(`Request to ${path} failed with ${res.status}`)
   }
-  return Math.random().toString(36).slice(2, 10)
-}
-
-function emptyGames() {
-  return { balloon: null, memory: null, cardSort: null, reaction: null }
-}
-
-function nowIso() {
-  return new Date().toISOString()
+  return res.json()
 }
 
 /** Create a new candidate session (admin "Generate link" action). */
 export async function createSession() {
-  const sessions = readSessions()
-  const session = {
-    id: generateId(),
-    createdAt: nowIso(),
-    status: "pending", // pending -> in_progress -> completed
-    candidateName: null,
-    candidateEmail: null,
-    position: null,
-    startedAt: null,
-    completedAt: null,
-    currentGameIndex: 0,
-    games: emptyGames(),
-  }
-  sessions.push(session)
-  writeSessions(sessions)
-  return session
+  return apiFetch("/sessions", { method: "POST" })
 }
 
 export async function getSession(id) {
-  return readSessions().find((s) => s.id === id) ?? null
+  return apiFetch(`/sessions/${id}`)
 }
 
 export async function listSessions() {
-  return readSessions().sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-  )
-}
-
-async function updateSession(id, patch) {
-  const sessions = readSessions()
-  const idx = sessions.findIndex((s) => s.id === id)
-  if (idx === -1) return null
-  sessions[idx] = { ...sessions[idx], ...patch }
-  writeSessions(sessions)
-  return sessions[idx]
+  return apiFetch("/sessions", { auth: true })
 }
 
 /** Candidate submits name/email/position on the welcome screen. */
 export async function startSession(id, { name, email, position }) {
-  return updateSession(id, {
-    candidateName: name,
-    candidateEmail: email,
-    position: position ?? null,
-    status: "in_progress",
-    startedAt: nowIso(),
+  return apiFetch(`/sessions/${id}/start`, {
+    method: "POST",
+    body: JSON.stringify({ name, email, position }),
   })
 }
 
 /** Save one game's metrics and advance the progress pointer. */
 export async function saveGameResult(id, gameKey, metrics) {
-  const session = await getSession(id)
-  if (!session) return null
-  const games = { ...session.games, [gameKey]: metrics }
-  const nextIndex = Math.min(
-    GAME_KEYS.indexOf(gameKey) + 1,
-    GAME_KEYS.length
-  )
-  return updateSession(id, { games, currentGameIndex: nextIndex })
+  return apiFetch(`/sessions/${id}/games/${gameKey}`, {
+    method: "POST",
+    body: JSON.stringify(metrics),
+  })
 }
 
 export async function completeSession(id) {
-  return updateSession(id, { status: "completed", completedAt: nowIso() })
-}
-
-export async function setCurrentGameIndex(id, index) {
-  return updateSession(id, { currentGameIndex: index })
+  return apiFetch(`/sessions/${id}/complete`, { method: "POST" })
 }
 
 export async function getCompletedSessions() {
@@ -122,41 +65,32 @@ export async function getComparisonPool(excludeId) {
 
 /** Append the built-in demo candidates (varied performance, two positions). */
 export async function seedSampleSessions() {
-  const sessions = readSessions()
-  const now = Date.now()
-  SAMPLE_CANDIDATES.forEach((candidate, i) => {
-    const completedAt = new Date(now - (SAMPLE_CANDIDATES.length - i) * 3600_000)
-    const startedAt = new Date(completedAt.getTime() - candidate.durationMinutes * 60_000)
-    sessions.push({
-      id: generateId(),
-      createdAt: startedAt.toISOString(),
-      status: "completed",
-      candidateName: candidate.candidateName,
-      candidateEmail: candidate.candidateEmail,
-      position: candidate.position,
-      startedAt: startedAt.toISOString(),
-      completedAt: completedAt.toISOString(),
-      currentGameIndex: GAME_KEYS.length,
-      games: candidate.games,
-    })
-  })
-  writeSessions(sessions)
-  return sessions
+  return apiFetch("/seed", { method: "POST", auth: true })
 }
 
-// --- Admin auth (v1: hardcoded passcode via env var) ---
+// --- Admin auth ---
+// The passcode is checked server-side now — it never ships in the JS
+// bundle — and a signed, expiring bearer token is what's actually kept in
+// this browser's localStorage. That's an appropriate use of localStorage
+// (a credential for *this device's* admin session), unlike candidate data,
+// which now lives in the shared database instead.
 
 export function isAdminAuthed() {
-  return localStorage.getItem(ADMIN_AUTH_KEY) === "true"
+  return Boolean(localStorage.getItem(ADMIN_TOKEN_KEY))
 }
 
 export async function adminLogin(passcode) {
-  const expected = import.meta.env.VITE_ADMIN_PASSCODE || "skillquest-admin"
-  const ok = passcode === expected
-  if (ok) localStorage.setItem(ADMIN_AUTH_KEY, "true")
-  return ok
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ passcode }),
+  })
+  if (!res.ok) return false
+  const { token } = await res.json()
+  localStorage.setItem(ADMIN_TOKEN_KEY, token)
+  return true
 }
 
 export async function adminLogout() {
-  localStorage.removeItem(ADMIN_AUTH_KEY)
+  localStorage.removeItem(ADMIN_TOKEN_KEY)
 }

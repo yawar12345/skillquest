@@ -90,7 +90,15 @@ export async function playMemoryGame(page) {
   for (let attempt = 0; attempt < 6; attempt++) {
     if (await page.locator('h2:has-text("Card Sort")').isVisible().catch(() => false)) return
     await page.waitForSelector("text=Your turn", { timeout: 10000 }).catch(() => {})
-    await page.locator('button[aria-label^="Cell"]').first().click().catch(() => {})
+    // The cell buttons exist (but are disabled) during the "showing" phase
+    // too — a plain .click() would retry against a disabled button for its
+    // full default actionability timeout (30s) instead of failing fast, so
+    // give it a short budget and just try again next iteration.
+    await page
+      .locator('button[aria-label^="Cell"]')
+      .first()
+      .click({ timeout: 1500 })
+      .catch(() => {})
     await page.waitForTimeout(1000)
   }
 }
@@ -109,7 +117,10 @@ export async function playCardSortGame(page) {
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
     if (await page.locator('h2:has-text("Reaction Speed")').isVisible().catch(() => false)) return
-    await page.getByRole("button", { name: "Pile 1" }).click().catch(() => {})
+    // The pile buttons are disabled during each trial's feedback window; a
+    // plain .click() would retry against a disabled button for its full
+    // default actionability timeout (30s) instead of failing fast.
+    await page.getByRole("button", { name: "Pile 1" }).click({ timeout: 1500 }).catch(() => {})
     await page.waitForTimeout(650)
   }
 }

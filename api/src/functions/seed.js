@@ -1,9 +1,13 @@
+const { app } = require("@azure/functions")
+const crypto = require("node:crypto")
+const { getContainer } = require("../lib/cosmos")
+const { isAdminRequest } = require("../lib/auth")
+
 // Ready-made candidates with deliberately varied performance profiles, so a
 // fresh admin dashboard has something meaningful to compare instead of an
 // empty state. Two positions are represented so the position-based
 // comparison filter has more than one candidate per role to work with.
-
-export const SAMPLE_CANDIDATES = [
+const SAMPLE_CANDIDATES = [
   {
     candidateName: "Jordan Lee",
     candidateEmail: "jordan.lee@example.com",
@@ -77,3 +81,41 @@ export const SAMPLE_CANDIDATES = [
     },
   },
 ]
+
+function generateId() {
+  return crypto.randomUUID().slice(0, 8)
+}
+
+app.http("seedSampleSessions", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "seed",
+  handler: async (request) => {
+    if (!isAdminRequest(request)) {
+      return { status: 401, jsonBody: { error: "Unauthorized" } }
+    }
+    const container = getContainer()
+    const now = Date.now()
+    const created = []
+    for (let i = 0; i < SAMPLE_CANDIDATES.length; i++) {
+      const candidate = SAMPLE_CANDIDATES[i]
+      const completedAt = new Date(now - (SAMPLE_CANDIDATES.length - i) * 3600_000)
+      const startedAt = new Date(completedAt.getTime() - candidate.durationMinutes * 60_000)
+      const session = {
+        id: generateId(),
+        createdAt: startedAt.toISOString(),
+        status: "completed",
+        candidateName: candidate.candidateName,
+        candidateEmail: candidate.candidateEmail,
+        position: candidate.position,
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
+        currentGameIndex: 4,
+        games: candidate.games,
+      }
+      await container.items.create(session)
+      created.push(session)
+    }
+    return { status: 201, jsonBody: created }
+  },
+})

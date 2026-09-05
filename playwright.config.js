@@ -1,8 +1,10 @@
 import { defineConfig, devices } from "@playwright/test"
 
-// Runs against the production build via `vite preview` — the same static
-// output that actually gets deployed — rather than the dev server, so this
-// is a gate on what ships, not on what HMR happens to render.
+// Runs against the production build (`vite preview`) with the real Azure
+// Functions API running alongside it — Vite's preview proxy forwards
+// /api/* to the Functions host on 7071, mirroring the same-origin routing
+// Azure Static Web Apps does in production — rather than against the dev
+// server, or against a frontend with no backend behind it.
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
@@ -17,10 +19,21 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npm run preview -- --port 4173 --strictPort",
-    url: "http://localhost:4173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: "npm run dev:api",
+      // Any response (even the 401 this unauthenticated GET returns) proves
+      // the Functions host is up and routing — that's all this probes for.
+      url: "http://localhost:7071/api/sessions",
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      stdout: "pipe",
+    },
+    {
+      command: "npm run preview -- --port 4173 --strictPort",
+      url: "http://localhost:4173",
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+  ],
 })
